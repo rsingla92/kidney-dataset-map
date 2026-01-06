@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kidney Dataset Registrations Map</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Marker Cluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+        
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        
+        .header {
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            z-index: 1000;
+            background: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .header .stats {
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .info-panel {
+            position: absolute;
+            bottom: 20px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            max-width: 300px;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .leaflet-popup-content {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .popup-content h3 {
+            margin: 0 0 8px 0;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+        
+        .popup-content p {
+            margin: 4px 0;
+            color: #555;
+            font-size: 12px;
+        }
+        
+        .popup-content .label {
+            color: #888;
+            font-size: 11px;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1001;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.3);
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .loading.hidden {
+            display: none;
+        }
+        
+        .error-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1001;
+            background: #fee;
+            border: 1px solid #c00;
+            padding: 20px 30px;
+            border-radius: 8px;
+            color: #900;
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .error-message.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="header">
+        <h1>🩺 Kidney Dataset Registrations</h1>
+        <div class="stats">
+            <span id="total-count">Loading...</span> registrations from <span id="country-count">-</span> countries
+        </div>
+    </div>
+    
+    <div class="info-panel">
+        Last updated: <span id="last-updated">-</span><br>
+        <small>Data refreshes automatically</small>
+    </div>
+    
+    <div class="loading" id="loading">
+        Loading registration data...
+    </div>
+    
+    <div class="error-message hidden" id="error">
+        Failed to load data. Please check the Google Sheet configuration.
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Marker Cluster JS -->
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    
+    <script>
+        // ============== CONFIGURATION ==============
+        // Replace this with your published Google Sheet CSV URL
+        // To get this URL:
+        // 1. In Google Sheets, go to File > Share > Publish to web
+        // 2. Select the "Registrations" sheet
+        // 3. Choose "Comma-separated values (.csv)"
+        // 4. Click Publish and copy the URL
+        const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSqNIXFwrYA_Ll2pU7XnfhQZ8MFAClaCgZKhe_jp0i5ZzDFr4ZoJAnRTvndoUTxqjp5KaEtxF2yE_w8/pub?gid=570068347&single=true&output=csv';
+        
+        // Refresh interval in milliseconds (5 minutes = 300000)
+        const REFRESH_INTERVAL = 300000;
+        
+        // ============== MAP SETUP ==============
+        const map = L.map('map').setView([30, 0], 2);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        
+        // Create marker cluster group
+        const markers = L.markerClusterGroup({
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false,
+            maxClusterRadius: 50
+        });
+        
+        map.addLayer(markers);
+        
+        // ============== DATA LOADING ==============
+        async function loadData() {
+            const loadingEl = document.getElementById('loading');
+            const errorEl = document.getElementById('error');
+            
+            try {
+                loadingEl.classList.remove('hidden');
+                errorEl.classList.add('hidden');
+                
+                const response = await fetch(SHEET_CSV_URL);
+                if (!response.ok) throw new Error('Failed to fetch data');
+                
+                const csvText = await response.text();
+                const parsed = Papa.parse(csvText, {
+                    header: true,
+                    skipEmptyLines: true
+                });
+                
+                if (parsed.errors.length > 0) {
+                    console.warn('CSV parse warnings:', parsed.errors);
+                }
+                
+                displayData(parsed.data);
+                loadingEl.classList.add('hidden');
+                
+                // Update last updated time
+                document.getElementById('last-updated').textContent = 
+                    new Date().toLocaleString();
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                loadingEl.classList.add('hidden');
+                errorEl.classList.remove('hidden');
+                errorEl.textContent = `Error: ${error.message}. Make sure the Google Sheet is published to web.`;
+            }
+        }
+        
+        function displayData(data) {
+            // Clear existing markers
+            markers.clearLayers();
+            
+            // Filter to only valid, sent registrations with coordinates
+            const validRegistrations = data.filter(row => 
+                row['Status'] === 'SENT' && 
+                row['Latitude'] && 
+                row['Longitude'] &&
+                !isNaN(parseFloat(row['Latitude'])) &&
+                !isNaN(parseFloat(row['Longitude']))
+            );
+            
+            // Count unique countries
+            const countries = new Set(validRegistrations.map(r => r['Country']).filter(Boolean));
+            
+            // Update stats
+            document.getElementById('total-count').textContent = validRegistrations.length;
+            document.getElementById('country-count').textContent = countries.size;
+            
+            // Add markers
+            for (const reg of validRegistrations) {
+                const lat = parseFloat(reg['Latitude']);
+                const lng = parseFloat(reg['Longitude']);
+                
+                if (isNaN(lat) || isNaN(lng)) continue;
+                
+                const marker = L.marker([lat, lng]);
+                
+                // Create popup content
+                const popupContent = `
+                    <div class="popup-content">
+                        <h3>${escapeHtml(reg['Institution'] || 'Unknown Institution')}</h3>
+                        <p><span class="label">Department:</span> ${escapeHtml(reg['Department'] || '-')}</p>
+                        <p><span class="label">Country:</span> ${escapeHtml(reg['Country'] || '-')}</p>
+                        <p><span class="label">Registered:</span> ${formatDate(reg['Date Processed'])}</p>
+                    </div>
+                `;
+                
+                marker.bindPopup(popupContent);
+                markers.addLayer(marker);
+            }
+            
+            // Fit bounds if we have markers
+            if (validRegistrations.length > 0) {
+                const bounds = markers.getBounds();
+                if (bounds.isValid()) {
+                    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 });
+                }
+            }
+        }
+        
+        // ============== UTILITIES ==============
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'short', 
+                    day: 'numeric' 
+                });
+            } catch {
+                return dateStr;
+            }
+        }
+        
+        // ============== INITIALIZATION ==============
+        // Load data on page load
+        loadData();
+        
+        // Refresh data periodically
+        setInterval(loadData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>
