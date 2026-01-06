@@ -254,8 +254,6 @@
                 const popupContent = `
                     <div class="popup-content">
                         <h3>${escapeHtml(reg['Institution'] || 'Unknown Institution')}</h3>
-                        <p><span class="label">Department:</span> ${escapeHtml(reg['Department'] || '-')}</p>
-                        <p><span class="label">Country:</span> ${escapeHtml(reg['Country'] || '-')}</p>
                         <p><span class="label">Registered:</span> ${formatDate(reg['Date Processed'])}</p>
                     </div>
                 `;
